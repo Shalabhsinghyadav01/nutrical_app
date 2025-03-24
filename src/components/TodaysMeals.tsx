@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, ScrollView } from 'react-native';
 import { Surface, Text, Portal, Modal, ProgressBar } from 'react-native-paper';
 
 interface Meal {
@@ -62,6 +62,14 @@ export default function TodaysMeals({ visible, onDismiss, meals, totalCalories, 
   const totalCarbs = meals.reduce((sum, meal) => sum + meal.carbs, 0);
   const totalFat = meals.reduce((sum, meal) => sum + meal.fat, 0);
 
+  // Get current date in local timezone
+  const now = new Date();
+  const today = now.toLocaleDateString('en-US', { 
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric'
+  });
+
   // Goals (these could come from user settings in the future)
   const proteinGoal = 150;
   const carbsGoal = 300;
@@ -74,82 +82,92 @@ export default function TodaysMeals({ visible, onDismiss, meals, totalCalories, 
         onDismiss={onDismiss}
         contentContainerStyle={styles.modalContainer}
       >
-        <Surface style={styles.surface} elevation={2}>
-          <Text variant="headlineMedium" style={styles.title}>Today's Meals</Text>
-
-          {/* Calories Section */}
-          <View style={styles.caloriesSection}>
-            <View style={styles.calorieHeader}>
-              <Text style={styles.calorieTitle}>Calories</Text>
-              <Text style={[styles.caloriePercentage, styles.greenText]}>
-                {Math.round((totalCalories / calorieGoal) * 100)}%
-              </Text>
-            </View>
-            <ProgressBar 
-              progress={totalCalories / calorieGoal}
-              color="#4CAF50"
-              style={styles.progressBar}
-            />
-            <View style={styles.calorieDetails}>
-              <CalorieDetailItem label="Goal" value={calorieGoal} />
-              <CalorieDetailItem label="Consumed" value={totalCalories} />
-              <CalorieDetailItem label="Remaining" value={calorieGoal - totalCalories} />
-            </View>
-          </View>
-
-          {/* Macros Section */}
-          <View style={styles.macrosContainer}>
-            <MacroItem 
-              label="Protein"
-              value={totalProtein}
-              goal={proteinGoal}
-              color="#FF6B6B"
-            />
-            <MacroItem 
-              label="Carbs"
-              value={totalCarbs}
-              goal={carbsGoal}
-              color="#4ECDC4"
-            />
-            <MacroItem 
-              label="Fat"
-              value={totalFat}
-              goal={fatGoal}
-              color="#45B7D1"
-            />
-          </View>
-
-          {/* Meals List */}
-          <View style={styles.mealsList}>
-            <Text style={styles.mealsListTitle}>Meals</Text>
-            {meals.map((meal, index) => (
-              <View key={index} style={styles.mealContainer}>
-                <View style={styles.mealHeader}>
-                  <Text style={styles.mealName}>{meal.name}</Text>
-                  <Text style={styles.mealCalories}>{meal.calories} cal</Text>
-                </View>
-                
-                <View style={styles.mealDetails}>
-                  <View style={styles.timeAndCuisine}>
-                    <Text style={styles.mealTime}>{meal.time}</Text>
-                    <Text style={styles.dot}>•</Text>
-                    <Text style={styles.cuisine}>{meal.cuisine}</Text>
-                  </View>
-                  
-                  <View style={styles.macros}>
-                    <Text style={styles.macroText}>P: {meal.protein}g</Text>
-                    <Text style={styles.dot}>•</Text>
-                    <Text style={styles.macroText}>C: {meal.carbs}g</Text>
-                    <Text style={styles.dot}>•</Text>
-                    <Text style={styles.macroText}>F: {meal.fat}g</Text>
-                  </View>
-                </View>
-
-                {index < meals.length - 1 && <View style={styles.divider} />}
+        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+          <Surface style={styles.surface} elevation={4}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text variant="headlineMedium" style={styles.title}>Today's Meals</Text>
+                <Text style={styles.dateText}>{today}</Text>
               </View>
-            ))}
-          </View>
-        </Surface>
+              <Text onPress={onDismiss} style={styles.closeButton}>✕</Text>
+            </View>
+
+            {/* Calories Section */}
+            <View style={styles.caloriesSection}>
+              <View style={styles.calorieHeader}>
+                <Text style={styles.calorieTitle}>Calories</Text>
+                <Text style={[styles.caloriePercentage, styles.greenText]}>
+                  {Math.round((totalCalories / calorieGoal) * 100)}%
+                </Text>
+              </View>
+              <ProgressBar 
+                progress={totalCalories / calorieGoal}
+                color="#4CAF50"
+                style={styles.progressBar}
+              />
+              <View style={styles.calorieDetails}>
+                <CalorieDetailItem label="Goal" value={calorieGoal} />
+                <CalorieDetailItem label="Consumed" value={totalCalories} />
+                <CalorieDetailItem label="Remaining" value={calorieGoal - totalCalories} />
+              </View>
+            </View>
+
+            {/* Macros Section */}
+            <View style={styles.macrosContainer}>
+              <MacroItem 
+                label="Protein"
+                value={totalProtein}
+                goal={proteinGoal}
+                color="#FF6B6B"
+              />
+              <MacroItem 
+                label="Carbs"
+                value={totalCarbs}
+                goal={carbsGoal}
+                color="#4ECDC4"
+              />
+              <MacroItem 
+                label="Fat"
+                value={totalFat}
+                goal={fatGoal}
+                color="#45B7D1"
+              />
+            </View>
+
+            {/* Meals List */}
+            <View style={styles.mealsListContainer}>
+              <Text style={styles.mealsListTitle}>Meals</Text>
+              <View style={styles.mealsList}>
+                {meals.map((meal, index) => (
+                  <View key={index} style={styles.mealContainer}>
+                    <View style={styles.mealHeader}>
+                      <Text style={styles.mealName}>{meal.name}</Text>
+                      <Text style={styles.mealCalories}>{meal.calories} cal</Text>
+                    </View>
+                    
+                    <View style={styles.mealDetails}>
+                      <View style={styles.timeAndCuisine}>
+                        <Text style={styles.mealTime}>{meal.time}</Text>
+                        <Text style={styles.dot}>•</Text>
+                        <Text style={styles.cuisine}>{meal.cuisine}</Text>
+                      </View>
+                      
+                      <View style={styles.macros}>
+                        <Text style={styles.macroText}>P: {meal.protein}g</Text>
+                        <Text style={styles.dot}>•</Text>
+                        <Text style={styles.macroText}>C: {meal.carbs}g</Text>
+                        <Text style={styles.dot}>•</Text>
+                        <Text style={styles.macroText}>F: {meal.fat}g</Text>
+                      </View>
+                    </View>
+
+                    {index < meals.length - 1 && <View style={styles.divider} />}
+                  </View>
+                ))}
+              </View>
+            </View>
+          </Surface>
+        </ScrollView>
       </Modal>
     </Portal>
   );
@@ -157,17 +175,43 @@ export default function TodaysMeals({ visible, onDismiss, meals, totalCalories, 
 
 const styles = StyleSheet.create({
   modalContainer: {
-    padding: 20,
+    margin: 20,
+    marginTop: 60,
+    marginBottom: 60,
+    alignSelf: 'center',
+    width: '90%',
+    maxWidth: 500,
+  },
+  scrollView: {
+    maxHeight: '100%',
   },
   surface: {
     backgroundColor: 'white',
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 24,
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 2
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
   },
   title: {
     fontWeight: '600',
     color: '#1a1a1a',
-    marginBottom: 24,
+  },
+  closeButton: {
+    fontSize: 24,
+    color: '#666666',
+    padding: 8,
   },
   caloriesSection: {
     marginBottom: 24,
@@ -243,75 +287,72 @@ const styles = StyleSheet.create({
   greenText: {
     color: '#4CAF50',
   },
+  mealsListContainer: {
+    marginTop: 8,
+  },
   mealsList: {
-    gap: 16,
+    paddingBottom: 16,
   },
   mealsListTitle: {
     fontSize: 20,
     fontWeight: '600',
     color: '#1a1a1a',
-    marginBottom: 12,
+    marginBottom: 16,
   },
   mealContainer: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    padding: 16,
+    paddingVertical: 12,
   },
   mealHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: 8,
   },
   mealName: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: '500',
     color: '#1a1a1a',
-    flex: 1,
-    marginRight: 12,
-    flexWrap: 'wrap',
   },
   mealCalories: {
     fontSize: 16,
-    fontWeight: '500',
-    color: '#4CAF50',
-    minWidth: 70,
-    textAlign: 'right',
+    color: '#666666',
   },
   mealDetails: {
-    gap: 8,
+    gap: 4,
   },
   timeAndCuisine: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
   },
   mealTime: {
-    fontSize: 14,
-    color: '#666666',
-  },
-  cuisine: {
-    fontSize: 14,
-    color: '#666666',
-    textTransform: 'capitalize',
-  },
-  macros: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-  },
-  macroText: {
     fontSize: 14,
     color: '#666666',
   },
   dot: {
     fontSize: 14,
     color: '#666666',
-    marginHorizontal: 6,
+    marginHorizontal: 8,
+  },
+  cuisine: {
+    fontSize: 14,
+    color: '#666666',
+  },
+  macros: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  macroText: {
+    fontSize: 14,
+    color: '#666666',
   },
   divider: {
     height: 1,
     backgroundColor: '#e0e0e0',
-    marginVertical: 12,
+    marginTop: 12,
+  },
+  dateText: {
+    fontSize: 16,
+    color: '#666666',
+    marginTop: 4,
   },
 }); 

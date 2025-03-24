@@ -36,6 +36,33 @@ const motivationalQuotes = [
   "Trust the process, embrace the journey."
 ];
 
+// Utility functions for date handling
+const getLocalDateString = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getStartOfWeek = (date: Date): Date => {
+  const result = new Date(date);
+  const day = result.getDay();
+  const diff = result.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
+  result.setDate(diff);
+  result.setHours(0, 0, 0, 0);
+  return result;
+};
+
+const addDays = (date: Date, days: number): Date => {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+};
+
+const isSameLocalDay = (date1: Date, date2: Date): boolean => {
+  return getLocalDateString(date1) === getLocalDateString(date2);
+};
+
 export default function DashboardScreen() {
   const [mealsModalVisible, setMealsModalVisible] = useState(false);
   const [currentQuote, setCurrentQuote] = useState('');
@@ -45,6 +72,32 @@ export default function DashboardScreen() {
   const navigation = useNavigation<NavigationProp>();
   const { userProfile } = useUser();
   const { theme } = useTheme();
+  
+  // Force a re-render when the date changes
+  const [currentDate, setCurrentDate] = useState(new Date());
+  
+  useEffect(() => {
+    const updateDate = () => {
+      const now = new Date();
+      const currentDateString = now.toLocaleDateString('en-US').split('/');
+      const formattedCurrentDate = `${currentDateString[2]}-${String(currentDateString[0]).padStart(2, '0')}-${String(currentDateString[1]).padStart(2, '0')}`;
+      const lastDateString = currentDate.toLocaleDateString('en-US').split('/');
+      const formattedLastDate = `${lastDateString[2]}-${String(lastDateString[0]).padStart(2, '0')}-${String(lastDateString[1]).padStart(2, '0')}`;
+      
+      if (formattedCurrentDate !== formattedLastDate) {
+        console.log('Date changed in DashboardScreen from', formattedLastDate, 'to', formattedCurrentDate);
+        setCurrentDate(now);
+      }
+    };
+
+    // Check immediately
+    updateDate();
+
+    // Set up interval to check every minute
+    const interval = setInterval(updateDate, 60000);
+
+    return () => clearInterval(interval);
+  }, [currentDate]);
   
   const todaysMeals = getTodaysMeals();
   
@@ -87,10 +140,10 @@ export default function DashboardScreen() {
   }, []);
   
   // Calculate totals from actual meals
-  const totalCalories = todaysMeals.reduce((sum, meal) => sum + meal.totalCalories, 0);
-  const totalProtein = todaysMeals.reduce((sum, meal) => sum + meal.totalProtein, 0);
-  const totalCarbs = todaysMeals.reduce((sum, meal) => sum + meal.totalCarbs, 0);
-  const totalFat = todaysMeals.reduce((sum, meal) => sum + meal.totalFat, 0);
+  const totalCalories = todaysMeals.reduce((sum, meal) => sum + (meal.totalCalories || 0), 0);
+  const totalProtein = todaysMeals.reduce((sum, meal) => sum + (meal.totalProtein || 0), 0);
+  const totalCarbs = todaysMeals.reduce((sum, meal) => sum + (meal.totalCarbs || 0), 0);
+  const totalFat = todaysMeals.reduce((sum, meal) => sum + (meal.totalFat || 0), 0);
 
   // Use goals from userProfile
   const calorieGoal = userProfile?.calorieGoal || 2400;
@@ -108,12 +161,12 @@ export default function DashboardScreen() {
   // Format meals for TodaysMeals component
   const formattedMeals = todaysMeals.map(meal => ({
     name: meal.name,
-    time: new Date(meal.dateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    time: meal.dateTime ? new Date(meal.dateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'No time',
     cuisine: meal.type.charAt(0).toUpperCase() + meal.type.slice(1),
-    calories: meal.totalCalories,
-    protein: meal.totalProtein,
-    carbs: meal.totalCarbs,
-    fat: meal.totalFat
+    calories: meal.totalCalories || 0,
+    protein: meal.totalProtein || 0,
+    carbs: meal.totalCarbs || 0,
+    fat: meal.totalFat || 0
   }));
 
   useEffect(() => {
@@ -124,25 +177,40 @@ export default function DashboardScreen() {
 
   // Get meals for a specific week based on offset
   const getWeeklyData = () => {
-    const today = new Date();
-    const startDate = new Date();
-    startDate.setDate(today.getDate() - (6 + (weekOffset * 7))); // Start 6 days before the end of the selected week
+    const now = new Date();
+    
+    // Get the start of the current week (Monday)
+    const currentWeekStart = getStartOfWeek(now);
+    
+    // Apply week offset
+    const targetWeekStart = addDays(currentWeekStart, -7 * weekOffset);
+    
+    console.log('[WeeklyData] Week starting from:', targetWeekStart.toLocaleString());
 
+    // Generate array of dates for the week
     const weekDays = Array.from({ length: 7 }, (_, i) => {
-      const date = new Date(startDate);
-      date.setDate(startDate.getDate() + i);
-      return date.toISOString().split('T')[0];
+      const date = addDays(targetWeekStart, i);
+      return getLocalDateString(date);
     });
 
-    return weekDays.map(date => {
-      const dayMeals = meals.filter(meal => meal.dateTime.startsWith(date));
-      const dayCalories = dayMeals.reduce((sum, meal) => sum + meal.totalCalories, 0);
-      const dayProtein = dayMeals.reduce((sum, meal) => sum + meal.totalProtein, 0);
-      const dayCarbs = dayMeals.reduce((sum, meal) => sum + meal.totalCarbs, 0);
-      const dayFat = dayMeals.reduce((sum, meal) => sum + meal.totalFat, 0);
+    console.log('[WeeklyData] Days in week:', weekDays);
+
+    return weekDays.map(dateString => {
+      // Filter meals for this specific day
+      const dayMeals = meals.filter(meal => {
+        if (!meal.dateTime) return false;
+        const mealDate = new Date(meal.dateTime);
+        return getLocalDateString(mealDate) === dateString;
+      });
+
+      // Calculate daily totals
+      const dayCalories = dayMeals.reduce((sum, meal) => sum + (meal.totalCalories || 0), 0);
+      const dayProtein = dayMeals.reduce((sum, meal) => sum + (meal.totalProtein || 0), 0);
+      const dayCarbs = dayMeals.reduce((sum, meal) => sum + (meal.totalCarbs || 0), 0);
+      const dayFat = dayMeals.reduce((sum, meal) => sum + (meal.totalFat || 0), 0);
 
       return {
-        date,
+        date: dateString,
         calories: dayCalories,
         protein: dayProtein,
         carbs: dayCarbs,
@@ -233,90 +301,128 @@ export default function DashboardScreen() {
     );
   };
 
-  const renderHistorySection = () => (
-    <Surface style={[styles.historyContainer, { backgroundColor: theme.colors.surface }]} elevation={1}>
-      <View style={styles.historyHeader}>
-        <Text variant="titleLarge" style={[styles.sectionTitle, { color: theme.colors.text }]}>Weekly Progress</Text>
-        <View style={styles.weekNavigation}>
-          <IconButton
-            icon="chevron-left"
-            size={24}
-            onPress={() => setWeekOffset(prev => prev + 1)}
-            iconColor={theme.colors.primary}
+  const renderHistorySection = () => {
+    if (!userProfile) {
+      return (
+        <Surface style={[styles.historyContainer, { backgroundColor: theme.colors.surface }]} elevation={1}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Loading profile...</Text>
+        </Surface>
+      );
+    }
+
+    if (!meals || meals.length === 0) {
+      return (
+        <Surface style={[styles.historyContainer, { backgroundColor: theme.colors.surface }]} elevation={1}>
+          <View style={styles.historyHeader}>
+            <Text variant="titleLarge" style={[styles.sectionTitle, { color: theme.colors.text }]}>Weekly Progress</Text>
+          </View>
+          <View style={[styles.emptyState, { paddingVertical: 40 }]}>
+            <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
+              No meals recorded yet. Add your first meal to see your progress!
+            </Text>
+          </View>
+        </Surface>
+      );
+    }
+
+    return (
+      <Surface style={[styles.historyContainer, { backgroundColor: theme.colors.surface }]} elevation={1}>
+        <View style={styles.historyHeader}>
+          <Text variant="titleLarge" style={[styles.sectionTitle, { color: theme.colors.text }]}>Weekly Progress</Text>
+          <View style={styles.weekNavigation}>
+            <IconButton
+              icon="chevron-left"
+              size={24}
+              onPress={() => setWeekOffset(prev => prev + 1)}
+              iconColor={theme.colors.primary}
+            />
+            <Text style={[styles.weekRangeText, { color: theme.colors.text }]}>{getWeekRangeText()}</Text>
+            <IconButton
+              icon="chevron-right"
+              size={24}
+              onPress={() => setWeekOffset(prev => Math.max(prev - 1, 0))}
+              iconColor={theme.colors.primary}
+              disabled={weekOffset === 0}
+            />
+          </View>
+        </View>
+        
+        <View style={styles.historyBars}>
+          {weeklyData.map((day, index) => {
+            const height = (day.calories / (calorieGoal || 2000)) * 150;
+            const date = new Date(day.date);
+            const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+            const isToday = isSameLocalDay(date, new Date());
+
+            return (
+              <TouchableOpacity 
+                key={day.date} 
+                style={styles.historyBarContainer}
+                onPress={() => setSelectedDay(day)}
+              >
+                <View style={styles.historyBarWrapper}>
+                  <View 
+                    style={[
+                      styles.historyBar, 
+                      { 
+                        height: Math.max(height, 20),
+                        backgroundColor: isToday ? theme.colors.primary : theme.colors.surfaceVariant,
+                      }
+                    ]} 
+                  />
+                </View>
+                <Text style={[
+                  styles.historyBarLabel, 
+                  { 
+                    color: isToday ? theme.colors.primary : theme.colors.textSecondary,
+                    fontWeight: isToday ? '600' : '500'
+                  }
+                ]}>{dayName}</Text>
+                <Text style={[
+                  styles.historyBarValue, 
+                  { 
+                    color: isToday ? theme.colors.primary : theme.colors.text,
+                    fontWeight: isToday ? '700' : '600'
+                  }
+                ]}>
+                  {day.calories}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <View style={styles.historyStats}>
+          <View style={styles.historyStatItem}>
+            <Text style={[styles.historyStatLabel, { color: theme.colors.textSecondary }]}>Avg. Calories</Text>
+            <Text style={[styles.historyStatValue, { color: theme.colors.text }]}>
+              {Math.round(weeklyData.reduce((sum, day) => sum + day.calories, 0) / 7)}
+            </Text>
+          </View>
+          <View style={styles.historyStatItem}>
+            <Text style={[styles.historyStatLabel, { color: theme.colors.textSecondary }]}>Avg. Protein</Text>
+            <Text style={[styles.historyStatValue, { color: theme.colors.text }]}>
+              {Math.round(weeklyData.reduce((sum, day) => sum + day.protein, 0) / 7)}g
+            </Text>
+          </View>
+          <View style={styles.historyStatItem}>
+            <Text style={[styles.historyStatLabel, { color: theme.colors.textSecondary }]}>Best Day</Text>
+            <Text style={[styles.historyStatValue, { color: theme.colors.success }]}>
+              {Math.max(...weeklyData.map(day => day.calories))}
+            </Text>
+          </View>
+        </View>
+
+        {selectedDay && (
+          <DayDetailsModal
+            day={selectedDay}
+            visible={!!selectedDay}
+            onDismiss={() => setSelectedDay(null)}
           />
-          <Text style={[styles.weekRangeText, { color: theme.colors.text }]}>{getWeekRangeText()}</Text>
-          <IconButton
-            icon="chevron-right"
-            size={24}
-            onPress={() => setWeekOffset(prev => Math.max(prev - 1, 0))}
-            iconColor={theme.colors.primary}
-            disabled={weekOffset === 0}
-          />
-        </View>
-      </View>
-      
-      <View style={styles.historyBars}>
-        {weeklyData.map((day, index) => {
-          const height = (day.calories / calorieGoal) * 150;
-          const dayName = new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' });
-          const isToday = day.date === new Date().toISOString().split('T')[0];
-
-          return (
-            <TouchableOpacity 
-              key={day.date} 
-              style={styles.historyBarContainer}
-              onPress={() => setSelectedDay(day)}
-            >
-              <View style={styles.historyBarWrapper}>
-                <View 
-                  style={[
-                    styles.historyBar, 
-                    { 
-                      height: Math.max(height, 20),
-                      backgroundColor: isToday ? theme.colors.primary : theme.colors.surfaceVariant,
-                    }
-                  ]} 
-                />
-              </View>
-              <Text style={[styles.historyBarLabel, { color: theme.colors.textSecondary }]}>{dayName}</Text>
-              <Text style={[styles.historyBarValue, { color: theme.colors.text }]}>
-                {day.calories}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      <View style={styles.historyStats}>
-        <View style={styles.historyStatItem}>
-          <Text style={[styles.historyStatLabel, { color: theme.colors.textSecondary }]}>Avg. Calories</Text>
-          <Text style={[styles.historyStatValue, { color: theme.colors.text }]}>
-            {Math.round(weeklyData.reduce((sum, day) => sum + day.calories, 0) / 7)}
-          </Text>
-        </View>
-        <View style={styles.historyStatItem}>
-          <Text style={[styles.historyStatLabel, { color: theme.colors.textSecondary }]}>Avg. Protein</Text>
-          <Text style={[styles.historyStatValue, { color: theme.colors.text }]}>
-            {Math.round(weeklyData.reduce((sum, day) => sum + day.protein, 0) / 7)}g
-          </Text>
-        </View>
-        <View style={styles.historyStatItem}>
-          <Text style={[styles.historyStatLabel, { color: theme.colors.textSecondary }]}>Best Day</Text>
-          <Text style={[styles.historyStatValue, { color: theme.colors.success }]}>
-            {Math.max(...weeklyData.map(day => day.calories))}
-          </Text>
-        </View>
-      </View>
-
-      {selectedDay && (
-        <DayDetailsModal
-          day={selectedDay}
-          visible={!!selectedDay}
-          onDismiss={() => setSelectedDay(null)}
-        />
-      )}
-    </Surface>
-  );
+        )}
+      </Surface>
+    );
+  };
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: theme.colors.background }]}>
@@ -685,5 +791,13 @@ const styles = StyleSheet.create({
   },
   modalButtonContent: {
     paddingVertical: 8,
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyStateText: {
+    fontSize: 16,
   },
 }); 

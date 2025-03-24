@@ -3,6 +3,10 @@ import { View, StyleSheet, Pressable, ScrollView, TouchableOpacity } from 'react
 import { Text, Surface, ProgressBar, Button, Portal, Modal, TextInput } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
+import { supabase, saveWaterIntake, getWaterIntake } from '../lib/supabase';
+import { useUser } from '../context/UserContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { format } from 'date-fns';
 
 interface Supplement {
   name: string;
@@ -12,8 +16,15 @@ interface Supplement {
   isAutoDetected?: boolean;
 }
 
+interface WaterIntakeData {
+  date: string;
+  intake: number;
+  supplements: Supplement[];
+}
+
 export default function WaterIntake() {
   const { theme } = useTheme();
+  const { userProfile } = useUser();
   const [currentIntake, setCurrentIntake] = useState(0);
   const [activeTab, setActiveTab] = useState('quickAdd');
   const [customAmount, setCustomAmount] = useState(250);
@@ -32,33 +43,140 @@ export default function WaterIntake() {
   const [baseGoalIntake, setBaseGoalIntake] = useState(3.1); // Base goal in liters
   const [adjustedGoalIntake, setAdjustedGoalIntake] = useState(3.1); // Adjusted goal based on supplements
 
+  // Load water intake data and supplement selections
+  useEffect(() => {
+    if (userProfile?.id) {
+      loadWaterIntake();
+      loadSupplementSelections();
+    }
+  }, [userProfile]);
+
+  // Reset only water intake at midnight
+  useEffect(() => {
+    if (!userProfile?.id) return;
+
+    const checkDateChange = () => {
+      const now = new Date();
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(0, 0, 0, 0);
+      
+      const timeUntilMidnight = tomorrow.getTime() - now.getTime();
+      
+      const timeoutId = setTimeout(() => {
+        resetWaterOnly();
+        loadWaterIntake();
+      }, timeUntilMidnight);
+
+      return () => clearTimeout(timeoutId);
+    };
+
+    const timeoutId = checkDateChange();
+    return () => clearTimeout(timeoutId);
+  }, [userProfile]);
+
+  const loadWaterIntake = async () => {
+    if (!userProfile?.id) return;
+    
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      console.log('Loading water intake for date:', today);
+      const data = await getWaterIntake(userProfile.id, today);
+      console.log('Raw water intake data:', data);
+      
+      if (data && typeof data.glasses === 'number') {
+        const liters = data.glasses * 0.25; // Convert glasses to liters (1 glass = 250ml = 0.25L)
+        console.log('Converting water intake:', { glasses: data.glasses, liters });
+        setCurrentIntake(liters);
+      } else {
+        console.log('No water intake data found, setting to 0');
+        setCurrentIntake(0);
+      }
+    } catch (error) {
+      console.error('Error loading water intake:', error);
+      setCurrentIntake(0);
+    }
+  };
+
+  const loadSupplementSelections = async () => {
+    try {
+      const savedSupplements = await AsyncStorage.getItem('supplementSelections');
+      if (savedSupplements) {
+        const parsedSupplements = JSON.parse(savedSupplements);
+        setSupplements(parsedSupplements);
+        updateWaterGoal(parsedSupplements);
+      }
+    } catch (error) {
+      console.error('Error loading supplement selections:', error);
+    }
+  };
+
+  const saveSupplementSelections = async (newSupplements: Supplement[]) => {
+    try {
+      await AsyncStorage.setItem('supplementSelections', JSON.stringify(newSupplements));
+    } catch (error) {
+      console.error('Error saving supplement selections:', error);
+    }
+  };
+
+  const saveWaterIntakeToDB = async (glasses: number) => {
+    try {
+      console.log('Saving water intake to DB:', { glasses });
+      const today = new Date().toISOString().split('T')[0];  // Format: YYYY-MM-DD
+      const result = await saveWaterIntake({
+        user_id: userProfile?.id || '',
+        date: today,
+        glasses: glasses
+      });
+      console.log('Water intake saved result:', result);
+      if (result) {
+        setCurrentIntake(result.glasses * 0.25); // Convert glasses to liters (1 glass = 250ml = 0.25L)
+      }
+    } catch (error) {
+      console.error('Error saving water intake:', error);
+    }
+  };
+
   // Effect to update goal when supplements change
   useEffect(() => {
-    updateWaterGoal();
+    updateWaterGoal(supplements);
   }, [supplements]);
 
-  const updateWaterGoal = () => {
-    const additionalWater = supplements
+  const updateWaterGoal = (currentSupplements: Supplement[]) => {
+    const additionalWater = currentSupplements
       .filter(s => s.isSelected)
       .reduce((sum, s) => sum + s.waterAmount, 0) / 1000; // Convert to liters
     const newGoal = baseGoalIntake + additionalWater;
     setAdjustedGoalIntake(newGoal);
   };
 
-  const addWater = (amount: number) => {
-    setCurrentIntake(Math.min(currentIntake + amount, adjustedGoalIntake));
+  const addWater = async (amount: number) => {
+    const newIntake = Math.min(currentIntake + amount, adjustedGoalIntake);
+    console.log('Adding water:', { amount, newIntake, currentIntake });
+    setCurrentIntake(newIntake);
+    const glasses = Math.round(newIntake * 4); // Convert liters to glasses (1L = 4 glasses)
+    await saveWaterIntakeToDB(glasses);
   };
 
-  const resetWater = () => {
+  const resetWaterOnly = async () => {
+    console.log('Resetting water intake to 0');
+    setCurrentIntake(0);
+    await saveWaterIntakeToDB(0);
+  };
+
+  const resetWater = async () => {
     setCurrentIntake(0);
     setSupplements(supplements.map(s => ({ ...s, isSelected: false })));
     setAdjustedGoalIntake(baseGoalIntake);
+    await saveWaterIntakeToDB(0);
+    await saveSupplementSelections(supplements.map(s => ({ ...s, isSelected: false })));
   };
 
-  const toggleSupplement = (index: number) => {
+  const toggleSupplement = async (index: number) => {
     const newSupplements = [...supplements];
     newSupplements[index].isSelected = !newSupplements[index].isSelected;
     setSupplements(newSupplements);
+    await saveSupplementSelections(newSupplements);
   };
 
   // AI function to detect supplements from meal
@@ -226,12 +344,12 @@ export default function WaterIntake() {
       </View>
 
       <View style={styles.progress}>
-        <Text style={[styles.currentIntake, { color: theme.colors.text }]}>{currentIntake.toFixed(1)}L</Text>
+        <Text style={[styles.currentIntake, { color: theme.colors.text }]}>{(currentIntake).toFixed(1)}L</Text>
         <Text style={[styles.goalIntake, { color: theme.colors.text }]}>{adjustedGoalIntake.toFixed(1)}L</Text>
       </View>
 
       <ProgressBar 
-        progress={currentIntake / adjustedGoalIntake} 
+        progress={currentIntake / (adjustedGoalIntake || 1)} 
         color={theme.colors.primary}
         style={[styles.progressBar, { backgroundColor: theme.colors.surfaceVariant }]}
       />

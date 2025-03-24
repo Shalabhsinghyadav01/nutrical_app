@@ -81,23 +81,34 @@ export const saveMeal = async (mealData: any) => {
     
     // Transform the data to match our database schema
     const transformedData = {
-      ...mealData,
-      date_time: mealData.dateTime, // Convert dateTime to date_time
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      id: mealData.id,
+      name: mealData.name,
+      created_at: mealData.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      date_time: mealData.date_time || new Date().toISOString(),
+      type: mealData.type,
+      foods: mealData.foods, // Already stringified in MealsContext
+      totalcalories: mealData.totalcalories || mealData.totalCalories || 0,
+      totalprotein: mealData.totalprotein || mealData.totalProtein || 0,
+      totalcarbs: mealData.totalcarbs || mealData.totalCarbs || 0,
+      totalfat: mealData.totalfat || mealData.totalFat || 0,
+      cuisine: mealData.cuisine,
+      user_id: mealData.user_id
     };
     
-    // Remove the original dateTime field
-    delete transformedData.dateTime;
+    console.log('Transformed meal data:', transformedData);
     
     const { data, error } = await supabase
       .from('meals')
-      .insert([transformedData]);
+      .insert([transformedData])
+      .select()
+      .single();
     
     if (error) {
       console.error('Error saving meal:', error);
       throw error;
     }
+    
     console.log('Meal saved successfully:', data);
     return data;
   } catch (error) {
@@ -256,7 +267,9 @@ export const saveWaterIntake = async (data: { user_id: string, date: string, gla
       .from('water_intake')
       .upsert([data], {
         onConflict: 'user_id,date'
-      });
+      })
+      .select()
+      .single();
     
     if (error) {
       console.error('Error saving water intake:', error);
@@ -278,17 +291,22 @@ export const getWaterIntake = async (userId: string, date: string) => {
       .select('*')
       .eq('user_id', userId)
       .eq('date', date)
-      .single();
+      .maybeSingle();
     
     if (error) {
       console.error('Error fetching water intake:', error);
       throw error;
     }
+    
+    if (!data) {
+      return { glasses: 0 };
+    }
+    
     console.log('Water intake fetched successfully:', data);
     return data;
   } catch (error) {
     console.error('Error fetching water intake:', error);
-    throw error;
+    return { glasses: 0 };
   }
 };
 

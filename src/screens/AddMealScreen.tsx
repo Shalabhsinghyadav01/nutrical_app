@@ -1,15 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, Pressable, Image, Alert } from 'react-native';
+import { View, StyleSheet, ScrollView, Pressable, Alert } from 'react-native';
 import { Text, Surface, SegmentedButtons, TextInput, Button, Menu, ProgressBar } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
 import { useMeals } from '../context/MealsContext';
 import { useUser } from '../context/UserContext';
 import { processName } from '../utils/transliteration';
-import { analyzeMealWithDeepSeek, analyzeMealImageWithDeepSeek, testDeepSeekConnection } from '../services/deepSeekService';
+import { analyzeMealWithDeepSeek, testDeepSeekConnection } from '../services/deepSeekService';
 import { useTheme } from '../context/ThemeContext';
+
+// Function to generate a UUID-like string
+const generateId = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
 
 export default function AddMealScreen({ navigation }) {
   const { theme } = useTheme();
@@ -24,7 +31,6 @@ export default function AddMealScreen({ navigation }) {
   }, [navigation]);
 
   const [inputMethod, setInputMethod] = useState('manual');
-  const [image, setImage] = useState<string | null>(null);
   const [mealName, setMealName] = useState('');
   const [transliteratedName, setTransliteratedName] = useState<string | null>(null);
   const [selectedCuisine, setSelectedCuisine] = useState<string>('other');
@@ -40,9 +46,11 @@ export default function AddMealScreen({ navigation }) {
   const [apiStatus, setApiStatus] = useState<'checking' | 'connected' | 'error'>('checking');
   const [detectedMealType, setDetectedMealType] = useState<'breakfast' | 'lunch' | 'dinner' | 'snack' | null>(null);
 
-  // Add calculations for total calories using user profile
+  // Add calculations for total calories using user profile and today's meals only
   const calorieGoal = userProfile?.calorieGoal || 2400; // Fallback to 2400 if profile not set
-  const totalCalories = meals.reduce((sum, meal) => sum + meal.totalCalories, 0);
+  const today = new Date().toISOString().split('T')[0];
+  const todaysMeals = meals.filter(meal => meal.dateTime && meal.dateTime.startsWith(today));
+  const totalCalories = todaysMeals.reduce((sum, meal) => sum + (meal.totalCalories || 0), 0);
   const remainingCalories = calorieGoal - totalCalories;
   const calorieProgress = Math.min(totalCalories / calorieGoal, 1);
   const caloriePercentage = Math.round(calorieProgress * 100);
@@ -85,64 +93,6 @@ export default function AddMealScreen({ navigation }) {
     checkApiConnection();
   }, []);
 
-  const handleImageAnalysis = async (imageUri: string) => {
-    try {
-      setIsCalculating(true);
-      const base64 = await FileSystem.readAsStringAsync(imageUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      const result = await analyzeMealImageWithDeepSeek(base64);
-      
-      setMealName(result.mealName);
-      setSelectedCuisine(result.cuisine.toLowerCase());
-      setCalories(result.nutrition.calories.toString());
-      setProtein(result.nutrition.protein.toString());
-      setCarbs(result.nutrition.carbs.toString());
-      setFat(result.nutrition.fat.toString());
-    } catch (error) {
-      setError('Failed to analyze image. Please try again.');
-      console.error('Error analyzing image:', error);
-    } finally {
-      setIsCalculating(false);
-    }
-  };
-
-  const handleImageUpload = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 1,
-      base64: true,
-    });
-
-    if (!result.canceled) {
-      setImage(result.assets[0].uri);
-      await handleImageAnalysis(result.assets[0].uri);
-    }
-  };
-
-  const handleCameraCapture = async () => {
-    const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-    
-    if (permissionResult.granted === false) {
-      alert("You need to grant camera permission to use this feature");
-      return;
-    }
-
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 1,
-      base64: true,
-    });
-
-    if (!result.canceled) {
-      setImage(result.assets[0].uri);
-      await handleImageAnalysis(result.assets[0].uri);
-    }
-  };
-
   const handleMealNameChange = async (text: string) => {
     setMealName(text);
     const result = await processName(text);
@@ -169,10 +119,11 @@ export default function AddMealScreen({ navigation }) {
         portionSize
       );
 
-      setCalories(result.calories.toString());
-      setProtein(result.protein.toString());
-      setCarbs(result.carbs.toString());
-      setFat(result.fat.toString());
+      // Safely access nutrition values with optional chaining and defaults
+      setCalories(result.nutrition?.calories?.toString() || '0');
+      setProtein(result.nutrition?.protein?.toString() || '0');
+      setCarbs(result.nutrition?.carbs?.toString() || '0');
+      setFat(result.nutrition?.fat?.toString() || '0');
     } catch (error) {
       setError('Failed to calculate nutrition information. Please try again.');
       console.error('Error calculating macros:', error);
@@ -199,7 +150,7 @@ export default function AddMealScreen({ navigation }) {
       setMealName(result.dishName);
       
       // Set the detected cuisine if available
-      if (result.cuisine !== 'other') {
+      if (result.cuisine && result.cuisine !== 'other') {
         setSelectedCuisine(result.cuisine);
       }
       
@@ -209,8 +160,12 @@ export default function AddMealScreen({ navigation }) {
       setCarbs(result.nutrition.carbs.toString());
       setFat(result.nutrition.fat.toString());
 
-      // Store the detected meal type for use when adding the meal
-      setDetectedMealType(result.mealType);
+      // Set the meal type - if not detected, use current time
+      if (result.mealType) {
+        setDetectedMealType(result.mealType as 'breakfast' | 'lunch' | 'dinner' | 'snack');
+      } else if (!detectedMealType) { // Only set if not already manually selected
+        setDetectedMealType(getCurrentMealType());
+      }
       
       setError(null); // Clear any previous errors
     } catch (error) {
@@ -230,35 +185,51 @@ export default function AddMealScreen({ navigation }) {
     setProtein('');
     setCarbs('');
     setFat('');
-    setImage(null);
     setMealDescription('');
     setDetectedMealType(null); // Clear detected meal type
     setError(null);
   };
 
   const handleAddMeal = async () => {
-    if (!validateBasicForm()) return;
+    if (!mealName) {
+      setError('Please enter a meal name');
+      return;
+    }
 
-    // If macros haven't been calculated yet, calculate them
-    if (!calories || !protein || !carbs || !fat) {
-      setIsCalculating(true);
+    // Parse numeric values
+    const parsedCalories = parseInt(calories) || 0;
+    const parsedProtein = parseInt(protein) || 0;
+    const parsedCarbs = parseInt(carbs) || 0;
+    const parsedFat = parseInt(fat) || 0;
+
+    // If using natural language and no macros calculated yet
+    if (inputMethod === 'natural' && (!parsedCalories || !parsedProtein || !parsedCarbs || !parsedFat)) {
       try {
-        const result = await analyzeMealWithDeepSeek(
-          mealName,
-          selectedCuisine,
-          portionSize
-        );
+        setIsCalculating(true);
+        setError(null);
+        const result = await analyzeMealWithDeepSeek(mealDescription);
         
-        // Validate the response data
-        if (!result || !result.nutrition) {
-          throw new Error('Invalid response from nutrition calculation');
+        if (!result) {
+          setError('Failed to analyze meal. Please try again or use manual input.');
+          return;
         }
 
-        // Safely convert values to string, defaulting to '0' if undefined
-        const calculatedCalories = (result.nutrition.calories || 0).toString();
-        const calculatedProtein = (result.nutrition.protein || 0).toString();
-        const calculatedCarbs = (result.nutrition.carbs || 0).toString();
-        const calculatedFat = (result.nutrition.fat || 0).toString();
+        const {
+          calories: calculatedCalories,
+          protein: calculatedProtein,
+          carbs: calculatedCarbs,
+          fat: calculatedFat,
+          cuisine: detectedCuisine,
+          mealType: detectedType
+        } = result;
+
+        // Update state with calculated values
+        setCalories(calculatedCalories.toString());
+        setProtein(calculatedProtein.toString());
+        setCarbs(calculatedCarbs.toString());
+        setFat(calculatedFat.toString());
+        if (detectedCuisine) setSelectedCuisine(detectedCuisine);
+        if (detectedType) setDetectedMealType(detectedType as 'breakfast' | 'lunch' | 'dinner' | 'snack');
 
         // Show confirmation popup with calculated macros
         Alert.alert(
@@ -273,28 +244,28 @@ export default function AddMealScreen({ navigation }) {
               text: 'Add Meal',
               onPress: () => {
                 // Add meal with calculated macros
+                const mealId = generateId();
+                const foodId = generateId();
                 const newMeal = {
-                  id: Date.now().toString(),
+                  id: mealId,
                   name: mealName,
                   dateTime: new Date().toISOString(),
                   type: detectedMealType || getCurrentMealType(),
                   foods: [{
-                    id: Date.now().toString(),
+                    id: foodId,
                     name: mealName,
                     portion: 1,
                     unit: 'serving',
-                    calories: parseInt(calculatedCalories) || 0,
-                    protein: parseInt(calculatedProtein) || 0,
-                    carbs: parseInt(calculatedCarbs) || 0,
-                    fat: parseInt(calculatedFat) || 0,
-                    imageUrl: image || undefined
+                    calories: calculatedCalories,
+                    protein: calculatedProtein,
+                    carbs: calculatedCarbs,
+                    fat: calculatedFat
                   }],
-                  totalCalories: parseInt(calculatedCalories) || 0,
-                  totalProtein: parseInt(calculatedProtein) || 0,
-                  totalCarbs: parseInt(calculatedCarbs) || 0,
-                  totalFat: parseInt(calculatedFat) || 0,
-                  cuisine: selectedCuisine,
-                  imageUrl: image || undefined
+                  totalCalories: calculatedCalories,
+                  totalProtein: calculatedProtein,
+                  totalCarbs: calculatedCarbs,
+                  totalFat: calculatedFat,
+                  cuisine: selectedCuisine
                 };
 
                 addMeal(newMeal);
@@ -316,7 +287,7 @@ export default function AddMealScreen({ navigation }) {
     // If macros are already calculated, show confirmation popup
     Alert.alert(
       'Meal Nutrition Info',
-      `Calories: ${calories} kcal\nProtein: ${protein}g\nCarbs: ${carbs}g\nFat: ${fat}g`,
+      `Calories: ${parsedCalories} kcal\nProtein: ${parsedProtein}g\nCarbs: ${parsedCarbs}g\nFat: ${parsedFat}g`,
       [
         {
           text: 'Cancel',
@@ -325,28 +296,28 @@ export default function AddMealScreen({ navigation }) {
         {
           text: 'Add Meal',
           onPress: () => {
+            const mealId = generateId();
+            const foodId = generateId();
             const newMeal = {
-              id: Date.now().toString(),
+              id: mealId,
               name: mealName,
               dateTime: new Date().toISOString(),
               type: detectedMealType || getCurrentMealType(),
               foods: [{
-                id: Date.now().toString(),
+                id: foodId,
                 name: mealName,
                 portion: 1,
                 unit: 'serving',
-                calories: parseInt(calories) || 0,
-                protein: parseInt(protein) || 0,
-                carbs: parseInt(carbs) || 0,
-                fat: parseInt(fat) || 0,
-                imageUrl: image || undefined
+                calories: parsedCalories,
+                protein: parsedProtein,
+                carbs: parsedCarbs,
+                fat: parsedFat
               }],
-              totalCalories: parseInt(calories) || 0,
-              totalProtein: parseInt(protein) || 0,
-              totalCarbs: parseInt(carbs) || 0,
-              totalFat: parseInt(fat) || 0,
-              cuisine: selectedCuisine,
-              imageUrl: image || undefined
+              totalCalories: parsedCalories,
+              totalProtein: parsedProtein,
+              totalCarbs: parsedCarbs,
+              totalFat: parsedFat,
+              cuisine: selectedCuisine
             };
 
             addMeal(newMeal);
@@ -368,11 +339,46 @@ export default function AddMealScreen({ navigation }) {
   };
 
   const renderManualInput = () => (
-    <Surface style={[styles.card, { backgroundColor: theme.colors.surface }]} elevation={1}>
-      <Text variant="headlineLarge" style={[styles.title, { color: theme.colors.text }]}>Add Meal</Text>
-      <Text variant="bodyLarge" style={[styles.subtitle, { color: theme.colors.textSecondary }]}>
-        Enter your meal details and let AI calculate the nutrition information.
-      </Text>
+    <Surface style={[styles.card, { backgroundColor: theme.colors.surface }]} elevation={2}>
+      <Text variant="titleLarge" style={[styles.sectionTitle, { color: theme.colors.text }]}>Add Meal Details</Text>
+
+      {/* Meal Type Selection - Moved to top */}
+      <View style={styles.inputSection}>
+        <Text variant="titleMedium" style={[styles.inputLabel, { color: theme.colors.text }]}>Meal Type</Text>
+        <View style={styles.mealTypeGrid}>
+          {['breakfast', 'lunch', 'dinner', 'snack'].map((type) => (
+            <Pressable
+              key={type}
+              style={[
+                styles.mealTypeButton,
+                { 
+                  backgroundColor: detectedMealType === type ? theme.colors.primary : theme.colors.surface,
+                  borderColor: detectedMealType === type ? theme.colors.primary : theme.colors.surfaceVariant
+                }
+              ]}
+              onPress={() => setDetectedMealType(type as 'breakfast' | 'lunch' | 'dinner' | 'snack')}
+            >
+              <MaterialCommunityIcons 
+                name={
+                  type === 'breakfast' ? 'food-croissant' :
+                  type === 'lunch' ? 'food' :
+                  type === 'dinner' ? 'food-turkey' :
+                  'food-apple'
+                } 
+                size={20} 
+                color={detectedMealType === type ? theme.colors.surface : theme.colors.text} 
+                style={styles.mealTypeIcon}
+              />
+              <Text style={[
+                styles.mealTypeButtonText,
+                { color: detectedMealType === type ? theme.colors.surface : theme.colors.text }
+              ]}>
+                {type.charAt(0).toUpperCase() + type.slice(1)}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
 
       {error && (
         <Text style={[styles.errorText, { color: theme.colors.error }]}>{error}</Text>
@@ -511,108 +517,83 @@ export default function AddMealScreen({ navigation }) {
     </Surface>
   );
 
-  const renderImageAI = () => (
-    <Surface style={[styles.card, { backgroundColor: theme.colors.surface }]} elevation={1}>
-      <Text variant="headlineLarge" style={[styles.title, { color: theme.colors.text }]}>
-        AI Food Recognition
-      </Text>
-      <Text variant="bodyLarge" style={[styles.subtitle, { color: theme.colors.textSecondary }]}>
-        Upload a food photo or take a picture and our AI will identify what you're eating.
-      </Text>
+  const renderNaturalInput = () => (
+    <Surface style={[styles.card, { backgroundColor: theme.colors.surface }]} elevation={2}>
+      <Text variant="titleLarge" style={[styles.sectionTitle, { color: theme.colors.text }]}>Describe Your Meal</Text>
 
-      <View style={styles.uploadButtons}>
-        <Pressable 
-          style={[styles.uploadButton, styles.galleryButton, { 
-            backgroundColor: theme.colors.surfaceVariant,
-            borderColor: theme.colors.border
-          }]}
-          onPress={handleImageUpload}
-        >
-          <MaterialCommunityIcons name="image" size={32} color={theme.colors.textSecondary} />
-          <Text style={[styles.uploadButtonText, { color: theme.colors.text }]}>
-            Choose from Gallery
-          </Text>
-        </Pressable>
-
-        <Pressable 
-          style={[styles.uploadButton, styles.cameraButton, { 
-            backgroundColor: theme.colors.surfaceVariant,
-            borderColor: theme.colors.border
-          }]}
-          onPress={handleCameraCapture}
-        >
-          <MaterialCommunityIcons name="camera" size={32} color={theme.colors.textSecondary} />
-          <Text style={[styles.uploadButtonText, { color: theme.colors.text }]}>
-            Take Photo
-          </Text>
-        </Pressable>
-      </View>
-
-      {image && (
-        <View style={styles.imagePreview}>
-          <Image source={{ uri: image }} style={styles.previewImage} />
-          <Pressable 
-            style={styles.removeImage}
-            onPress={() => setImage(null)}
-          >
-            <MaterialCommunityIcons name="close-circle" size={24} color={theme.colors.textSecondary} />
-          </Pressable>
+      {/* Meal Type Selection */}
+      <View style={styles.inputSection}>
+        <Text variant="titleMedium" style={[styles.inputLabel, { color: theme.colors.text }]}>Meal Type</Text>
+        <View style={styles.mealTypeGrid}>
+          {['breakfast', 'lunch', 'dinner', 'snack'].map((type) => (
+            <Pressable
+              key={type}
+              style={[
+                styles.mealTypeButton,
+                { 
+                  backgroundColor: detectedMealType === type ? theme.colors.primary : theme.colors.surface,
+                  borderColor: detectedMealType === type ? theme.colors.primary : theme.colors.surfaceVariant
+                }
+              ]}
+              onPress={() => setDetectedMealType(type as 'breakfast' | 'lunch' | 'dinner' | 'snack')}
+            >
+              <MaterialCommunityIcons 
+                name={
+                  type === 'breakfast' ? 'food-croissant' :
+                  type === 'lunch' ? 'food' :
+                  type === 'dinner' ? 'food-turkey' :
+                  'food-apple'
+                } 
+                size={20} 
+                color={detectedMealType === type ? theme.colors.surface : theme.colors.text} 
+                style={styles.mealTypeIcon}
+              />
+              <Text style={[
+                styles.mealTypeButtonText,
+                { color: detectedMealType === type ? theme.colors.surface : theme.colors.text }
+              ]}>
+                {type.charAt(0).toUpperCase() + type.slice(1)}
+              </Text>
+            </Pressable>
+          ))}
         </View>
-      )}
-
-      <Text variant="bodyLarge" style={[styles.footerText, { color: theme.colors.textSecondary }]}>
-        Our AI analyzes your food photos to identify meals and estimate nutrition information.
-      </Text>
-    </Surface>
-  );
-
-  const renderNaturalLang = () => (
-    <Surface style={[styles.card, { backgroundColor: theme.colors.surface }]} elevation={1}>
-      <Text variant="headlineLarge" style={[styles.title, { color: theme.colors.text }]}>
-        Natural Language Meal Entry
-      </Text>
-      <Text variant="bodyLarge" style={[styles.subtitle, { color: theme.colors.textSecondary }]}>
-        Simply describe your meal in natural language and let our AI figure out the details.
-      </Text>
+      </View>
 
       {error && (
         <Text style={[styles.errorText, { color: theme.colors.error }]}>{error}</Text>
       )}
 
-      <TextInput
-        mode="outlined"
-        placeholder="E.g. I had a large chicken burrito with rice, beans, and guacamole for lunch"
-        value={mealDescription}
-        onChangeText={setMealDescription}
-        multiline
-        numberOfLines={4}
-        style={[styles.textArea, { backgroundColor: theme.colors.surfaceVariant }]}
-        outlineStyle={styles.textAreaOutline}
-        textColor={theme.colors.text}
-        placeholderTextColor={theme.colors.textSecondary}
-      />
+      <View style={styles.inputSection}>
+        <Text variant="titleMedium" style={[styles.inputLabel, { color: theme.colors.text }]}>Meal Description*</Text>
+        <TextInput
+          mode="outlined"
+          placeholder="Describe your meal in natural language..."
+          value={mealDescription}
+          onChangeText={setMealDescription}
+          multiline
+          numberOfLines={4}
+          style={[styles.input, styles.textArea, { backgroundColor: theme.colors.surfaceVariant }]}
+          outlineStyle={styles.inputOutline}
+          textColor={theme.colors.text}
+          placeholderTextColor={theme.colors.textSecondary}
+        />
+      </View>
 
       <Button
         mode="contained"
         onPress={handleProcessDescription}
-        style={[styles.processButton, { backgroundColor: theme.colors.primary }]}
-        contentStyle={styles.processButtonContent}
-        labelStyle={[styles.processButtonLabel, { color: theme.colors.surface }]}
+        style={[styles.calculateButton, { backgroundColor: theme.colors.primary }]}
+        contentStyle={styles.calculateButtonContent}
+        labelStyle={[styles.calculateButtonLabel, { color: theme.colors.surface }]}
         loading={isCalculating}
-        disabled={isCalculating}
+        disabled={isCalculating || apiStatus !== 'connected'}
       >
         {isCalculating ? 'Processing...' : 'Process Description'}
       </Button>
 
       {calories && protein && carbs && fat && (
         <View style={styles.macrosContainer}>
-          <Text variant="titleMedium" style={[styles.macrosTitle, { color: theme.colors.text }]}>Detected Meal Information</Text>
-          <View style={[styles.detectedInfo, { backgroundColor: theme.colors.surfaceVariant }]}>
-            <Text style={[styles.detectedInfoText, { color: theme.colors.text }]}>Name: {mealName}</Text>
-            <Text style={[styles.detectedInfoText, { color: theme.colors.text }]}>Cuisine: {selectedCuisine}</Text>
-            <Text style={[styles.detectedInfoText, { color: theme.colors.text }]}>Portion: {portionSize}</Text>
-          </View>
-          <Text variant="titleMedium" style={[styles.macrosTitle, { color: theme.colors.text }]}>Calculated Nutrition</Text>
+          <Text variant="titleMedium" style={[styles.macrosTitle, { color: theme.colors.text }]}>Detected Nutrition</Text>
           <View style={styles.macrosGrid}>
             <View style={[styles.macroItem, { backgroundColor: theme.colors.surfaceVariant }]}>
               <Text style={[styles.macroLabel, { color: theme.colors.text }]}>Calories</Text>
@@ -634,16 +615,17 @@ export default function AddMealScreen({ navigation }) {
         </View>
       )}
 
-      <Button
-        mode="contained"
-        onPress={handleAddMeal}
-        style={[styles.addButton, { backgroundColor: theme.colors.primary }]}
-        contentStyle={styles.addButtonContent}
-        labelStyle={[styles.addButtonLabel, { color: theme.colors.surface }]}
-        disabled={!calories || !protein || !carbs || !fat}
-      >
-        Add Meal
-      </Button>
+      {calories && protein && carbs && fat && (
+        <Button
+          mode="contained"
+          onPress={handleAddMeal}
+          style={[styles.addButton, { backgroundColor: theme.colors.primary }]}
+          contentStyle={styles.addButtonContent}
+          labelStyle={[styles.addButtonLabel, { color: theme.colors.surface }]}
+        >
+          Add Meal
+        </Button>
+      )}
     </Surface>
   );
 
@@ -682,17 +664,14 @@ export default function AddMealScreen({ navigation }) {
             value={inputMethod}
             onValueChange={setInputMethod}
             buttons={[
-              { value: 'manual', label: 'Manual' },
-              { value: 'imageai', label: 'Image AI' },
-              { value: 'naturallang', label: 'Natural Lang' },
+              { value: 'manual', label: 'Manual', icon: 'pencil' },
+              { value: 'natural', label: 'Natural', icon: 'text' }
             ]}
             style={[styles.segmentedButtons, { backgroundColor: theme.colors.surface }]}
           />
         </View>
 
-        {inputMethod === 'manual' ? renderManualInput() : 
-         inputMethod === 'imageai' ? renderImageAI() : 
-         renderNaturalLang()}
+        {inputMethod === 'manual' ? renderManualInput() : renderNaturalInput()}
       </ScrollView>
     </SafeAreaView>
   );
@@ -926,65 +905,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.5,
   },
-  // Image AI styles
-  uploadButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 32,
-    gap: 16,
-  },
-  uploadButton: {
-    flex: 1,
-    height: 160,
-    borderWidth: 2,
-    borderColor: '#E0E0E0',
-    borderStyle: 'dashed',
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f8f9fa',
-  },
-  uploadButtonText: {
-    fontSize: 16,
-    color: '#666666',
-    marginTop: 12,
-    textAlign: 'center',
-    fontWeight: '500',
-  },
-  imagePreview: {
-    marginBottom: 32,
-    borderRadius: 20,
-    overflow: 'hidden',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-  },
-  previewImage: {
-    width: '100%',
-    height: 240,
-    resizeMode: 'cover',
-  },
-  removeImage: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 8,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  footerText: {
-    fontSize: 16,
-    color: '#666666',
-    textAlign: 'center',
-    lineHeight: 24,
-  },
   textArea: {
     backgroundColor: 'white',
     marginBottom: 24,
@@ -1089,5 +1009,30 @@ const styles = StyleSheet.create({
     color: '#1a1a1a',
     marginBottom: 12,
     fontWeight: '500',
+  },
+  mealTypeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 8,
+  },
+  mealTypeButton: {
+    flex: 1,
+    minWidth: '45%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    gap: 8,
+  },
+  mealTypeButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  mealTypeIcon: {
+    marginRight: 4,
   },
 }); 

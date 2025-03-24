@@ -1,15 +1,16 @@
 import React from 'react';
 import { View, StyleSheet, ScrollView, Alert } from 'react-native';
-import { Text, List, Switch, Button, Surface, Divider, useTheme, TouchableRipple } from 'react-native-paper';
+import { Text, List, Switch, Button, Surface, Divider, TouchableRipple } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useUser } from '../context/UserContext';
 import { signOut } from '../lib/supabase';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
 
 export const SettingsScreen = () => {
-  const theme = useTheme();
+  const { theme, isDarkMode, toggleTheme } = useTheme();
   const navigation = useNavigation();
   const { signOut: authSignOut } = useAuth();
   const { userProfile } = useUser();
@@ -82,8 +83,8 @@ export const SettingsScreen = () => {
               left={props => <List.Icon {...props} icon="theme-light-dark" />}
               right={() => (
                 <Switch
-                  value={theme.isDarkMode}
-                  onValueChange={theme.toggleTheme}
+                  value={isDarkMode}
+                  onValueChange={toggleTheme}
                   color={theme.colors.primary}
                 />
               )}
