@@ -78,11 +78,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📬 Contact
 
-Have questions or suggestions? Reach out to us:
-
-- Email: [Your Email]
-- Twitter: [@YourHandle]
-- LinkedIn: [Your LinkedIn]
+If you have any questions or want to discuss the project, feel free to reach out:
+- **Name**: Shalabh Singh Yadav
+- **Email**: [shalabhsinghyadav@gmail.com](mailto:shalabhsinghyadav@gmail.com)
+- **LinkedIn**: [LinkedIn Profile](https://www.linkedin.com/in/shalabh-singh-yadav-66b607204/)
+- **Tableau**: [Tableau Profile](https://public.tableau.com/app/profile/shalabh.yadav/vizzes)
 
 ---
 
