@@ -72,9 +72,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 👥 Team
 
-- **Lead Developer**: [Your Name]
-- **UI/UX Design**: [Designer Name]
-- **AI Integration**: [AI Developer Name]
+- **Lead Developer**: Shalabh Singh Yadav
+- **UI/UX Design**: Shalabh Singh Yadav
+- **AI Integration**: Shalabh Singh Yadav
 
 ## 📬 Contact
 
